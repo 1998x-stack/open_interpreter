@@ -279,6 +279,26 @@ class Interpreter:
                         parsed = parse_partial_json(fc["arguments"])
                         if parsed:
                             self.messages[-1]["function_call"]["parsed_arguments"] = parsed
+                        else:
+                            # 如果解析失败但有基础字段，则尝试构建基础结构
+                            arguments_str = fc["arguments"]
+                            if '"language"' in arguments_str or '"code"' in arguments_str:
+                                # Attempt to extract language and code if they're partially present
+                                import re
+                                extracted = {}
+                                # Look for language pattern: "language": "xyz"
+                                lang_match = re.search(r'"language"\s*:\s*"([^"]*)"', arguments_str)
+                                if lang_match:
+                                    extracted["language"] = lang_match.group(1)
+
+                                # Look for code pattern: "code": "some code..."
+                                code_match = re.search(r'"code"\s*:\s*"((?:[^"]|\\.)*)', arguments_str, re.DOTALL)
+                                if code_match:
+                                    # This extracts the code value up to the point we have
+                                    extracted["code"] = code_match.group(1)
+
+                                if extracted:
+                                    self.messages[-1]["function_call"]["parsed_arguments"] = extracted
 
                 else:
                     if in_function_call:
@@ -321,12 +341,48 @@ class Interpreter:
         """
         try:
             fc = self.messages[-1].get("function_call", {})
+
+            # First try to get pre-parsed arguments (may have been parsed during streaming)
             parsed = fc.get("parsed_arguments", {}) if fc else {}
+
+            # If no parsed arguments are available, try to parse the raw arguments now
+            if not parsed and fc and "arguments" in fc:
+                parsed = parse_partial_json(fc["arguments"]) or {}
+
+            # As a last resort, try to parse the arguments from the message directly if fc is None
+            if not parsed and not fc:
+                full_message = self.messages[-1]
+                if "function_call" in full_message and isinstance(full_message["function_call"], dict):
+                    fc_alt = full_message["function_call"]
+                    if "arguments" in fc_alt:
+                        parsed = parse_partial_json(fc_alt["arguments"]) or {}
+
+            # Check if the function_call field itself is None, and handle it differently
+            if fc is None:
+                # This could indicate that there was a parsing issue during streaming
+                # Check the entire message for code
+                message_content = self.messages[-1]
+                # If the code is in the content field instead of function_call
+                if "content" in message_content and message_content["content"]:
+                    # Look for Python code patterns in the content
+                    import re
+                    content = message_content["content"]
+                    # Look for Python code blocks in markdown format or just raw Python
+                    python_code_pattern = r"(?<!\\)`{3}(?:python)?\n(.*?)\n`{3}|^(\s*def\s+\w+\s*\(|\s*import\s+\w+|\s*for\s+.*:|\s*if\s+.*:|\s*class\s+\w+\s*:)"
+                    if re.search(python_code_pattern, content, re.MULTILINE | re.DOTALL):
+                        # This looks like it should have been a code execution
+                        # Since we can't run it directly from content, warn and return
+                        logger.warning("[Interpreter] Detected Python code in content field instead of function call")
+                        logger.debug(f"[Interpreter] Content: {content}")
+                        return
+
             language = parsed.get("language", "python")
             code = parsed.get("code", "")
 
             if not code:
                 logger.warning("[Interpreter] function_call 无代码内容，跳过")
+                # Print the actual content to debug
+                logger.debug(f"[Interpreter] function_call content: {self.messages[-1]}")
                 return
 
             # 用户确认

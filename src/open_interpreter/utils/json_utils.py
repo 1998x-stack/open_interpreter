@@ -117,6 +117,15 @@ def parse_partial_json(s: str) -> Any | None:
     if not s or not s.strip():
         return None
 
+    # Handle the most common case: just the opening part like {"language"
+    # These need to be handled specially as they don't have any values yet
+    if s.strip() in ('{', '{"', '{"l', '{"la', '{"lan', '{"lang', '{"langu',
+                      '{"langua', '{"languag', '{"language', '{"language"',
+                      '{"language":', '{"language": "'):
+        # Not much we can do with these, return None but don't log as warning
+        # as these are expected during streaming
+        return None
+
     # 1. 尝试直接解析
     try:
         return json.loads(s)
@@ -126,34 +135,136 @@ def parse_partial_json(s: str) -> Any | None:
     # 2. 修复裸换行
     s = escape_newlines_in_json_string_values(s)
 
-    # 3. 追踪结构，补全括号
-    stack: list[str] = []
-    is_inside_string = False
+    # 3. Use a proper parser to understand the JSON structure
+    stack = []  # Track open braces/brackets
+    in_string = False  # Track if we're inside a string
+    escaped = False  # Track if the next character is escaped
 
     for char in s:
-        if char == '"':
-            if stack and stack[-1] == "\\":
-                stack.pop()
-            else:
-                is_inside_string = not is_inside_string
-        elif not is_inside_string:
-            if char in ("{", "["):
+        if escaped:
+            escaped = False
+            continue
+
+        if char == '\\':
+            escaped = True
+        elif char == '"' and not escaped:
+            in_string = not in_string
+        elif not in_string:
+            if char in '{[':
                 stack.append(char)
-            elif char in ("}", "]"):
-                if stack and stack[-1] in ("{", "["):
-                    stack.pop()
+            elif char == '}' and stack and stack[-1] == '{':
+                stack.pop()
+            elif char == ']' and stack and stack[-1] == '[':
+                stack.pop()
 
-    if is_inside_string:
-        s += '"'
+    # Now complete the JSON by closing all open structures
+    result = s
 
+    # If we're in a string, close it
+    if in_string:
+        result += '"'
+
+    # Close any remaining open objects/arrays in reverse order
     while stack:
-        open_char = stack.pop()
-        s += "}" if open_char == "{" else "]"
+        top = stack.pop()
+        if top == '{':
+            result += '}'
+        elif top == '[':
+            result += ']'
 
+    # Try parsing the completed JSON
     try:
-        return json.loads(s)
+        return json.loads(result)
     except json.JSONDecodeError:
-        logger.warning(f"parse_partial_json: 仍无法解析，返回 None. snippet={s[:80]!r}")
+        # Handle specific common incomplete function call patterns for our use case
+        if '"run_code"' in s or '"language"' in s or '"code"' in s:
+            # This is likely a function call in progress, try to construct expected shape
+            import re
+
+            # Try to extract the key-value pairs that are complete
+            result_dict = {}
+
+            # Extract language if complete
+            lang_match = re.search(r'"language"\s*:\s*"([^"]*)"', s)
+            if lang_match:
+                result_dict['language'] = lang_match.group(1)
+
+            # Extract code if complete (handling potential multiline content)
+            # Look for the "code": "..." pattern, being mindful of escape sequences
+            code_match = re.search(r'"code"\s*:\s*"((?:[^"]|\\.)*)', s, re.DOTALL)
+            if code_match:
+                code_content = code_match.group(1)
+                # If the match doesn't end the string or ends without closing quote,
+                # it's an incomplete code value
+                code_full_match = code_match.group(0)
+                pos_after_code = s.find(code_full_match) + len(code_full_match)
+                if pos_after_code < len(s) and s[pos_after_code-1] != '"':
+                    # The code string is not closed yet, but we can still return what we have
+                    result_dict['code'] = code_content
+                else:
+                    # Check if the string properly closes
+                    remaining = s[pos_after_code:]
+                    if remaining.strip().startswith(',') or remaining.strip().startswith('}'):
+                        result_dict['code'] = code_content
+
+            if result_dict:
+                return result_dict
+
+        # If the manual completion didn't work, try simpler fixes
+        # Try trimming the string bit by bit until it parses
+        for i in range(len(result), 0, -1):
+            try:
+                sub = result[:i]
+                # Add back a quote if we seem to be mid-string
+                if sub.count('"') % 2 == 1:  # Odd number of quotes
+                    test_str = sub + '"'
+                else:
+                    test_str = sub
+
+                # Try to complete brackets if needed
+                temp_stack = []
+                temp_in_string = False
+                temp_escaped = False
+
+                for char in test_str:
+                    if temp_escaped:
+                        temp_escaped = False
+                        continue
+                    if char == '\\':
+                        temp_escaped = True
+                    elif char == '"' and not temp_escaped:
+                        temp_in_string = not temp_in_string
+                    elif not temp_in_string:
+                        if char in '{[':
+                            temp_stack.append(char)
+                        elif char == '}' and temp_stack and temp_stack[-1] == '{':
+                            temp_stack.pop()
+                        elif char == ']' and temp_stack and temp_stack[-1] == '[':
+                            temp_stack.pop()
+
+                # Complete the test string
+                complete_test = test_str
+                if temp_in_string and not temp_escaped:
+                    complete_test += '"'
+                while temp_stack:
+                    top = temp_stack.pop()
+                    if top == '{':
+                        complete_test += '}'
+                    elif top == '[':
+                        complete_test += ']'
+
+                parsed_result = json.loads(complete_test)
+                if isinstance(parsed_result, dict):
+                    # Verify this result makes sense for our use case
+                    if 'language' in parsed_result or 'code' in parsed_result:
+                        return parsed_result
+            except json.JSONDecodeError:
+                continue
+
+        # Only log warning for genuinely problematic cases, not expected streaming fragments
+        if len(s) > 15:  # If it's not just a short fragment
+            logger.warning(f"parse_partial_json: 仍无法解析，返回 None. snippet={s[:80]!r}")
+
         return None
 
 
