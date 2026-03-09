@@ -261,7 +261,7 @@ class Interpreter:
                 self.messages[-1] = merge_deltas(self.messages[-1], delta)
 
                 # 检测是否进入 function call
-                in_fc_now = "function_call" in self.messages[-1]
+                in_fc_now = self.messages[-1] and "function_call" in self.messages[-1]
 
                 if in_fc_now:
                     if not in_function_call:
@@ -275,7 +275,7 @@ class Interpreter:
 
                     # 解析 function_call.arguments（流式 JSON）
                     fc = self.messages[-1].get("function_call", {})
-                    if "arguments" in fc:
+                    if fc and "arguments" in fc:
                         parsed = parse_partial_json(fc["arguments"])
                         if parsed:
                             self.messages[-1]["function_call"]["parsed_arguments"] = parsed
@@ -321,7 +321,7 @@ class Interpreter:
         """
         try:
             fc = self.messages[-1].get("function_call", {})
-            parsed = fc.get("parsed_arguments", {})
+            parsed = fc.get("parsed_arguments", {}) if fc else {}
             language = parsed.get("language", "python")
             code = parsed.get("code", "")
 

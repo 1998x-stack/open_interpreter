@@ -35,16 +35,19 @@ def merge_deltas(original: dict, delta: dict) -> dict:
     """
     logger.debug(f"merge_deltas: delta_keys={list(delta.keys())}")
     try:
+        if original is None:
+            original = {}
         for key, value in delta.items():
-            if isinstance(value, dict):
-                if key not in original:
-                    original[key] = value
-                else:
-                    merge_deltas(original[key], value)
+            if value is None:
+                original[key] = None
+            elif isinstance(value, dict):
+                if key not in original or original[key] is None:
+                    original[key] = {}
+                merge_deltas(original[key], value)
             else:
-                if key in original:
+                if key in original and original[key] is not None and value is not None:
                     original[key] += value
-                else:
+                elif value is not None:
                     original[key] = value
         return original
     except Exception:

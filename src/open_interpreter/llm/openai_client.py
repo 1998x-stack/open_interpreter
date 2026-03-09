@@ -142,7 +142,12 @@ class OpenAIClient(BaseLLMClient):
         """
         try:
             import tokentrim as tt
-            return tt.trim(messages, model, system_message=system_message)
+            model_context_limits = {
+                "qwen-plus": 32768,
+                "qwen-turbo": 8192,  # Add other Qwen variants here
+                "qwen-max": 32768
+            }
+            return tt.trim(messages, max_tokens=model_context_limits.get(model, 4096), system_message=system_message)
         except ImportError:
             logger.warning("[openai_client] tokentrim 未安装，跳过消息裁剪")
             return messages
