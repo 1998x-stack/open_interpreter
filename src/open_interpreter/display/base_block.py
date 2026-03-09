@@ -1,36 +1,30 @@
 """
-Abstract base class BaseBlock
+display/base_block.py — 终端显示块抽象基类
+
+CodeBlock 和 MessageBlock 的共同接口。
 """
 
+from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Any
 
 
 class BaseBlock(ABC):
-    """
-    Abstract base class for all display blocks
-    """
-    
-    def __init__(self):
-        super().__init__()
-    
+    """终端显示块基类（Rich Live 包装）。"""
+
+    active_line: int | None = None
+    output: str = ""
+
     @abstractmethod
-    def display(self, content: Any, **kwargs):
-        """
-        Abstract method to display content
-        """
-        pass
-    
+    def update_from_message(self, message: dict) -> None:
+        """根据最新消息更新显示内容。"""
+        ...
+
     @abstractmethod
-    def update(self, content: Any, **kwargs):
-        """
-        Abstract method to update displayed content
-        """
-        pass
-    
+    def refresh(self, cursor: bool = True) -> None:
+        """刷新终端显示。"""
+        ...
+
     @abstractmethod
-    def clear(self):
-        """
-        Abstract method to clear the display
-        """
-        pass
+    def end(self) -> None:
+        """关闭 Rich Live，释放终端控制权。"""
+        ...

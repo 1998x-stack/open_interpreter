@@ -1,10 +1,9 @@
-# Core dependencies
-rich>=13.0.0
+openai>=1.30.0
+rich>=13.7.0
+loguru>=0.7.2
 python-dotenv>=1.0.0
-requests>=2.30.0
-pydantic>=2.0.0
-
-# Optional: for extended functionality
-numpy>=1.24.0
-pandas>=2.0.0
-matplotlib>=3.7.0
+tokentrim>=0.1.3
+astor>=0.8.1
+requests>=2.31.0
+pytest>=8.0.0
+pytest-mock>=3.12.0

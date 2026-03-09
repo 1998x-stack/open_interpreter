@@ -1,7 +1,3 @@
-"""
-Display module initialization
-"""
-
 from .base_block import BaseBlock
 from .code_block import CodeBlock
 from .message_block import MessageBlock

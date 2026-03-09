@@ -1,69 +1,100 @@
 """
-LLMFactory: Registration and creation of LLM clients
+llm/llm_factory.py — LLM 客户端工厂
+
+与 ExecutorFactory 对称：注册表 + 工厂，解耦 LLM 后端实现。
+内置注册：openai（支持 OpenAI 及兼容 API）
 """
 
-from typing import Dict, Type
-from .base_llm import BaseLLMClient
+from __future__ import annotations
+
+import sys
+import traceback
+from typing import TYPE_CHECKING
+
+from loguru import logger
+
 from .openai_client import OpenAIClient
+
+if TYPE_CHECKING:
+    from ..config import Settings
+    from .base_llm import BaseLLMClient
 
 
 class LLMFactory:
     """
-    Factory class for creating LLM clients
+    LLM 客户端工厂。
+
+    Examples
+    --------
+    >>> client = LLMFactory.create("openai", config=get_config())
+    >>> for chunk in client.stream_chat(messages):
+    ...     process(chunk)
     """
-    
-    _clients: Dict[str, Type[BaseLLMClient]] = {}
-    
+
+    _registry: dict[str, type["BaseLLMClient"]] = {}
+
     @classmethod
-    def register(cls, name: str, client_class: Type[BaseLLMClient]):
-        """
-        Register an LLM client class
-        """
-        cls._clients[name.lower()] = client_class
-    
+    def register(cls, provider: str, client_cls: type["BaseLLMClient"]) -> None:
+        """注册 LLM 客户端类。"""
+        cls._registry[provider.lower()] = client_cls
+        logger.debug(f"[LLMFactory] 注册 provider: {provider} → {client_cls.__name__}")
+
     @classmethod
-    def create(cls, model_name: str, **kwargs) -> BaseLLMClient:
+    def create(cls, provider: str, config: "Settings") -> "BaseLLMClient":
         """
-        Create an instance of an LLM client based on model name
+        创建 LLM 客户端实例。
+
+        Parameters
+        ----------
+        provider : str
+            LLM 后端标识（如 "openai"）
+        config : Settings
+            全局配置对象
+
+        Returns
+        -------
+        BaseLLMClient
+
+        Raises
+        ------
+        ValueError
+            provider 未注册时
         """
-        # Determine client type based on model name
-        model_name_lower = model_name.lower()
-        
-        # Register default clients if not already registered
-        cls._register_defaults()
-        
-        # Determine which client to use based on model name
-        if any(provider in model_name_lower for provider in ['gpt-', 'openai']):
-            client_class = cls._clients.get('openai', OpenAIClient)
-        elif any(provider in model_name_lower for provider in ['claude']):
-            # Would need ClaudeClient if implemented
-            raise NotImplementedError(f"Claude models not implemented yet: {model_name}")
-        elif any(provider in model_name_lower for provider in ['gemini', 'vertex']):
-            # Would need GeminiClient if implemented
-            raise NotImplementedError(f"Gemini models not implemented yet: {model_name}")
-        else:
-            # Default to OpenAI client for unknown models
-            client_class = cls._clients.get('openai', OpenAIClient)
-        
-        # Get config values
-        from ..config import Config
-        config = Config()
-        
-        return client_class(
-            api_key=config.OPENAI_API_KEY,
-            base_url=config.OPENAI_BASE_URL,
-            model=model_name,
-            **kwargs
-        )
-    
+        key = provider.lower()
+
+        if key not in cls._registry:
+            available = list(cls._registry.keys())
+            raise ValueError(
+                f"未知 LLM provider: {key!r}。\n"
+                f"已注册: {available}\n"
+                "可通过 LLMFactory.register('mybackend', MyClient) 扩展。"
+            )
+
+        try:
+            client_cls = cls._registry[key]
+            instance = client_cls(config=config)
+            logger.info(f"[LLMFactory] 创建 {key} 客户端: {client_cls.__name__}")
+            return instance
+        except Exception:
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            error_message = repr(traceback.format_exception(exc_type, exc_value, exc_traceback))
+            logger.error(f"[LLMFactory] 创建 {key} 客户端失败: {error_message}")
+            raise
+
     @classmethod
-    def _register_defaults(cls):
-        """
-        Register default LLM clients
-        """
-        if not cls._clients:
-            cls.register("openai", OpenAIClient)
+    def list_providers(cls) -> list[str]:
+        return list(cls._registry.keys())
 
 
-# Register default clients on module load
-LLMFactory._register_defaults()
+# ── 内置注册 ────────────────────────────────────────────────────
+LLMFactory.register("openai", OpenAIClient)
+
+
+# ── standalone 演示 ─────────────────────────────────────────────
+if __name__ == "__main__":
+    print(f"已注册 LLM providers: {LLMFactory.list_providers()}")
+
+    try:
+        LLMFactory.create("anthropic", config=None)  # type: ignore
+    except ValueError as e:
+        print(f"Expected error: {e}")

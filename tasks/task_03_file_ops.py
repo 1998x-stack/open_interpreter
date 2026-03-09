@@ -1,204 +1,84 @@
-#!/usr/bin/env python3
 """
-Task 03: File operations with batch renaming and directory organization
+tasks/task_03_file_ops.py — 示例任务 3：文件批量操作与目录管理
+
+任务描述：
+  让 Open Interpreter 完成一系列文件系统操作：
+  1. 创建测试目录结构
+  2. 生成多种格式的测试文件（.txt / .py / .json）
+  3. 批量统计文件信息
+  4. 按文件类型归类（移动到子目录）
+  5. 生成目录清单报告
+
+此任务演示：
+  - os / pathlib 文件操作
+  - Shell 命令执行（ls / find）
+  - 文件读写
+  - 综合 Python + Shell 混合执行
 """
 
-import os
-import shutil
-import tempfile
-import time
+from __future__ import annotations
+
+import sys
 from pathlib import Path
-from datetime import datetime
-from typing import List, Tuple
+
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
+
+from dotenv import load_dotenv
+load_dotenv(_ROOT / ".env")
+
+from loguru import logger
+from src.open_interpreter import Interpreter
 
 
-def create_sample_files(directory: Path, num_files: int = 10) -> List[Path]:
-    """Create sample files for demonstration"""
-    file_extensions = ['.txt', '.py', '.js', '.md', '.csv', '.json']
-    sample_contents = [
-        "This is a sample text file.",
-        "#!/usr/bin/env python\nprint('Hello World')",
-        "console.log('Hello World');",
-        "# Sample Markdown\nThis is a sample markdown file.",
-        "name,age,city\nJohn,30,NYC",
-        '{"name": "sample", "value": 42}'
-    ]
-    
-    created_files = []
-    
-    for i in range(num_files):
-        ext = file_extensions[i % len(file_extensions)]
-        filename = f"sample_file_{i:02d}{ext}"
-        filepath = directory / filename
-        
-        with open(filepath, 'w') as f:
-            content_idx = i % len(sample_contents)
-            f.write(sample_contents[content_idx])
-        
-        # Add some variation in modification times
-        mod_time = time.time() - (i * 86400)  # Different days ago
-        os.utime(filepath, (mod_time, mod_time))
-        
-        created_files.append(filepath)
-    
-    return created_files
+TASK = """
+请用 Python 完成以下文件管理任务（所有操作在当前目录下的 test_workspace/ 中进行）：
+
+**步骤 1：创建测试环境**
+在当前目录创建 test_workspace/ 目录，在其中创建以下文件：
+- notes_001.txt, notes_002.txt, notes_003.txt（内容：随机 3 句英文句子）
+- script_001.py, script_002.py（内容：简单的 Python hello world）
+- config_001.json, config_002.json（内容：{"name": "test", "version": "1.0"}）
+- README.md（内容：# Test Workspace\\n\\nThis is a test.）
+
+**步骤 2：统计文件信息**
+遍历 test_workspace/ 中的所有文件，打印一个表格：
+文件名 | 扩展名 | 大小(bytes) | 修改时间
+按文件名排序。
+
+**步骤 3：按类型归类**
+在 test_workspace/ 中创建子目录：texts/, scripts/, configs/, docs/
+将 .txt 文件移到 texts/，.py 文件移到 scripts/，.json 文件移到 configs/，.md 文件移到 docs/。
+移动后打印每个操作的确认信息。
+
+**步骤 4：生成汇总报告**
+打印最终目录结构（用缩进树形格式），并统计每个子目录的文件数量和总大小。
+"""
 
 
-def organize_by_extension(source_dir: Path, target_dir: Path):
-    """Organize files by extension into subdirectories"""
-    print(f"Organizing files from {source_dir} to {target_dir}")
-    
-    # Create extension-based subdirectories
-    ext_dirs = {}
-    for file_path in source_dir.glob("*"):
-        if file_path.is_file():
-            ext = file_path.suffix.lower() or "_no_ext"
-            ext_dir = target_dir / ext[1:] if ext.startswith('.') else ext  # Remove dot from extension
-            ext_dir.mkdir(exist_ok=True)
-            
-            # Move file to appropriate directory
-            target_path = ext_dir / file_path.name
-            shutil.move(str(file_path), str(target_path))
-            print(f"  Moved {file_path.name} to {ext_dir.name}/")
+def main() -> None:
+    logger.info("=== 任务 3：文件批量操作与目录管理 ===")
 
+    interp = Interpreter()
+    interp.auto_run = True
 
-def batch_rename(directory: Path, prefix: str = "renamed_"):
-    """Batch rename files in a directory with a prefix"""
-    files = [f for f in directory.iterdir() if f.is_file()]
-    
-    print(f"Renaming {len(files)} files in {directory} with prefix '{prefix}'")
-    
-    renamed_count = 0
-    for file_path in files:
-        new_name = f"{prefix}{file_path.name}"
-        new_path = file_path.parent / new_name
-        
-        # Handle naming conflicts
-        counter = 1
-        while new_path.exists():
-            name_part = file_path.stem
-            ext_part = file_path.suffix
-            new_name = f"{prefix}{name_part}_{counter}{ext_part}"
-            new_path = file_path.parent / new_name
-            counter += 1
-        
-        file_path.rename(new_path)
-        print(f"  Renamed {file_path.name} -> {new_name}")
-        renamed_count += 1
-    
-    return renamed_count
+    messages = interp.chat(TASK, return_messages=True)
 
+    if messages:
+        code_runs = sum(1 for m in messages if m.get("role") == "function")
+        logger.info(f"任务完成：共 {len(messages)} 条消息，执行了 {code_runs} 次代码")
 
-def get_file_stats(file_paths: List[Path]) -> dict:
-    """Get statistics about a list of files"""
-    total_size = 0
-    file_types = {}
-    
-    for file_path in file_paths:
-        if file_path.is_file():
-            size = file_path.stat().st_size
-            total_size += size
-            
-            ext = file_path.suffix.lower() or "_no_ext"
-            if ext in file_types:
-                file_types[ext] += 1
-            else:
-                file_types[ext] = 1
-    
-    return {
-        "total_size_bytes": total_size,
-        "total_size_mb": round(total_size / (1024 * 1024), 2),
-        "file_count": len(file_paths),
-        "file_types": file_types
-    }
-
-
-def find_duplicate_names(directory: Path) -> List[Tuple[str, List[Path]]]:
-    """Find files with duplicate names in subdirectories"""
-    name_map = {}
-    
-    for file_path in directory.rglob("*"):
-        if file_path.is_file():
-            name = file_path.name
-            if name not in name_map:
-                name_map[name] = []
-            name_map[name].append(file_path)
-    
-    duplicates = [(name, paths) for name, paths in name_map.items() if len(paths) > 1]
-    return duplicates
-
-
-def main():
-    print("Task 3: File Operations - Batch Renaming and Directory Organization")
-    print("=" * 70)
-    
-    # Create a temporary directory for our operations
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
-        
-        # Create sample files
-        print("Creating sample files...")
-        sample_files = create_sample_files(temp_path, 15)
-        initial_stats = get_file_stats(sample_files)
-        
-        print(f"Created {initial_stats['file_count']} files with total size: {initial_stats['total_size_mb']} MB")
-        print(f"File types: {initial_stats['file_types']}")
-        
-        # Create an 'organized' subdirectory
-        organized_dir = temp_path / "organized"
-        organized_dir.mkdir()
-        
-        # Organize files by extension
-        print("\nOrganizing files by extension...")
-        organize_by_extension(temp_path, organized_dir)
-        
-        # Get stats for organized files
-        all_org_files = []
-        for subdir in organized_dir.iterdir():
-            if subdir.is_dir():
-                all_org_files.extend(list(subdir.glob("*")))
-        
-        organized_stats = get_file_stats(all_org_files)
-        print(f"After organization: {organized_stats['file_count']} files")
-        
-        # Perform batch renaming in each subdirectory
-        print("\nPerforming batch renaming...")
-        for subdir in organized_dir.iterdir():
-            if subdir.is_dir():
-                print(f"\nRenaming files in {subdir.name}/:")
-                renamed_count = batch_rename(subdir, prefix=f"file_{subdir.name}_")
-                print(f"Renamed {renamed_count} files in {subdir.name}/")
-        
-        # Look for potential duplicate names after renaming
-        print("\nChecking for duplicate file names...")
-        duplicates = find_duplicate_names(organized_dir)
-        if duplicates:
-            print("Found potential duplicates:")
-            for name, paths in duplicates:
-                print(f"  {name}: {[str(p) for p in paths]}")
+        # 验证文件结构是否生成
+        ws = Path("test_workspace")
+        if ws.exists():
+            all_files = list(ws.rglob("*"))
+            logger.info(
+                f"test_workspace/ 中共 {len([f for f in all_files if f.is_file()])} 个文件"
+            )
         else:
-            print("  No duplicate file names found.")
-        
-        # Final statistics
-        all_final_files = []
-        for subdir in organized_dir.iterdir():
-            if subdir.is_dir():
-                all_final_files.extend(list(subdir.glob("*")))
-        
-        final_stats = get_file_stats(all_final_files)
-        print(f"\nFinal stats: {final_stats['file_count']} files, {final_stats['total_size_mb']} MB")
-        print(f"File types after organization: {final_stats['file_types']}")
-        
-        print(f"\nOrganization completed! Files organized in: {organized_dir}")
-        
-        # List the final structure
-        print("\nFinal directory structure:")
-        for subdir in organized_dir.iterdir():
-            if subdir.is_dir():
-                files_in_subdir = list(subdir.glob("*"))
-                print(f"  {subdir.name}/: {len(files_in_subdir)} files")
-    
-    print("\nTask completed successfully!")
+            logger.warning("test_workspace/ 未被创建")
+
+    logger.info("=== 任务 3 结束 ===")
 
 
 if __name__ == "__main__":

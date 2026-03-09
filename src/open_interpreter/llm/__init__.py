@@ -1,7 +1,3 @@
-"""
-LLM module initialization
-"""
-
 from .base_llm import BaseLLMClient
 from .llm_factory import LLMFactory
 from .openai_client import OpenAIClient

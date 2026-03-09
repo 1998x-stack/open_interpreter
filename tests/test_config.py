@@ -1,76 +1,122 @@
 """
-Unit tests for configuration module
+tests/test_config.py — 配置模块单元测试
 """
 
 import os
-import tempfile
-from unittest.mock import patch
-from src.open_interpreter.config import Config
+import sys
+import pytest
+from pathlib import Path
+
+# 确保导入路径正确
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
 
 
-def test_default_config_values():
-    """Test that default configuration values are set correctly"""
-    config = Config()
-    
-    # Test default values
-    assert config.OPENAI_API_KEY == ""
-    assert config.OPENAI_BASE_URL == "https://api.openai.com/v1"
-    assert config.MODEL == "gpt-4o"
-    assert config.MAX_OUTPUT_LENGTH == 1000
-    assert config.TIMEOUT_SECONDS == 30
-    assert config.THEME == "dark"
-    assert config.SHOW_TIMESTAMPS is True
+@pytest.fixture(autouse=True)
+def reset_config_cache():
+    """每个测试前后重置 lru_cache"""
+    from src.open_interpreter.config import reset_config
+    reset_config()
+    yield
+    reset_config()
 
 
-def test_config_from_environment():
-    """Test that config values can be overridden by environment variables"""
-    with patch.dict(os.environ, {
-        'OPENAI_API_KEY': 'test-key-123',
-        'OPENAI_BASE_URL': 'https://test-api.example.com/v1',
-        'MODEL': 'gpt-5-test',
-        'MAX_OUTPUT_LENGTH': '2000',
-        'TIMEOUT_SECONDS': '60',
-        'THEME': 'light',
-        'SHOW_TIMESTAMPS': 'false'
-    }):
-        config = Config()
-        
-        assert config.OPENAI_API_KEY == 'test-key-123'
-        assert config.OPENAI_BASE_URL == 'https://test-api.example.com/v1'
-        assert config.MODEL == 'gpt-5-test'
-        assert config.MAX_OUTPUT_LENGTH == 2000
-        assert config.TIMEOUT_SECONDS == 60
-        assert config.THEME == 'light'
-        assert config.SHOW_TIMESTAMPS is False
+class TestSettings:
+
+    def test_default_model(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.delenv("OPENAI_MODEL", raising=False)
+
+        from src.open_interpreter.config import get_config
+        cfg = get_config()
+        assert cfg.openai_model == "gpt-4o"
+
+    def test_custom_model(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("OPENAI_MODEL", "gpt-3.5-turbo")
+
+        from src.open_interpreter.config import get_config
+        cfg = get_config()
+        assert cfg.openai_model == "gpt-3.5-turbo"
+
+    def test_custom_base_url(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://my-proxy.example.com/v1")
+
+        from src.open_interpreter.config import get_config
+        cfg = get_config()
+        assert cfg.openai_base_url == "https://my-proxy.example.com/v1"
+
+    def test_auto_run_true(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("AUTO_RUN", "true")
+
+        from src.open_interpreter.config import get_config
+        cfg = get_config()
+        assert cfg.auto_run is True
+
+    def test_auto_run_variations(self, monkeypatch):
+        """AUTO_RUN 接受 true/yes/1/on"""
+        from src.open_interpreter.config import _parse_bool
+        for truthy in ("true", "True", "TRUE", "1", "yes", "on"):
+            assert _parse_bool(truthy) is True
+        for falsy in ("false", "0", "no", "off", ""):
+            assert _parse_bool(falsy) is False
+
+    def test_debug_mode_default_false(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.delenv("DEBUG_MODE", raising=False)
+
+        from src.open_interpreter.config import get_config
+        cfg = get_config()
+        assert cfg.debug_mode is False
+
+    def test_max_output_chars(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MAX_OUTPUT_CHARS", "5000")
+
+        from src.open_interpreter.config import get_config
+        cfg = get_config()
+        assert cfg.max_output_chars == 5000
+
+    def test_validate_raises_on_missing_api_key(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        from src.open_interpreter.config import Settings
+        settings = Settings(openai_api_key="")
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            settings.validate()
+
+    def test_validate_passes_with_api_key(self, monkeypatch):
+        from src.open_interpreter.config import Settings
+        settings = Settings(openai_api_key="sk-valid-key")
+        settings.validate()  # should not raise
+
+    def test_lru_cache_singleton(self, monkeypatch):
+        """同一进程中两次 get_config() 应返回同一对象"""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+        from src.open_interpreter.config import get_config
+        cfg1 = get_config()
+        cfg2 = get_config()
+        assert cfg1 is cfg2
+
+    def test_temperature_default(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.delenv("TEMPERATURE", raising=False)
+
+        from src.open_interpreter.config import get_config
+        cfg = get_config()
+        assert cfg.temperature == pytest.approx(0.01)
+
+    def test_temperature_custom(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("TEMPERATURE", "0.7")
+
+        from src.open_interpreter.config import get_config
+        cfg = get_config()
+        assert cfg.temperature == pytest.approx(0.7)
 
 
-def test_config_validation():
-    """Test configuration validation"""
-    config = Config()
-    
-    # Should not raise an exception with valid values
-    config.validate()
-    
-    # Temporarily set invalid timeout
-    original_timeout = config.TIMEOUT_SECONDS
-    config.TIMEOUT_SECONDS = -5
-    try:
-        config.validate()
-        assert False, "Expected ValueError for negative timeout"
-    except ValueError as e:
-        assert "TIMEOUT_SECONDS must be positive" in str(e)
-    
-    # Restore valid value
-    config.TIMEOUT_SECONDS = original_timeout
-    
-    # Temporarily set invalid max output length
-    original_max_len = config.MAX_OUTPUT_LENGTH
-    config.MAX_OUTPUT_LENGTH = 0
-    try:
-        config.validate()
-        assert False, "Expected ValueError for zero max output length"
-    except ValueError as e:
-        assert "MAX_OUTPUT_LENGTH must be positive" in str(e)
-    
-    # Restore valid value
-    config.MAX_OUTPUT_LENGTH = original_max_len
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

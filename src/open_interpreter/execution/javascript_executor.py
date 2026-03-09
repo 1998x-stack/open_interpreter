@@ -1,124 +1,90 @@
 """
-JavascriptExecutor: Node.js executor
+execution/javascript_executor.py — JavaScript / Node.js 代码执行器
+
+使用 `node -i`（交互模式）执行 JavaScript 代码。
+需要系统已安装 Node.js。
 """
 
-import subprocess
-import tempfile
-import os
-from typing import Dict, Any, Optional
+from __future__ import annotations
+
+import shutil
+import sys
+import traceback
+
+from loguru import logger
+
 from .base_executor import BaseExecutor
-from ..config import Config
 
 
-class JavascriptExecutor(BaseExecutor):
+class JavaScriptExecutor(BaseExecutor):
     """
-    Executor for running JavaScript code with Node.js
+    JavaScript 代码执行器（Node.js -i 交互模式）。
+
+    与 PythonExecutor 类似，支持跨 run() 调用的会话状态保持。
     """
-    
-    def __init__(self):
-        super().__init__()
-        self.config = Config()
-    
-    def execute(self, code: str, timeout: Optional[int] = None) -> Dict[str, Any]:
-        """
-        Execute JavaScript code with Node.js
-        """
-        if timeout is None:
-            timeout = self.config.TIMEOUT_SECONDS
-        
-        # Create a temporary file to hold the JS code
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
-            f.write(code)
-            temp_file = f.name
-        
-        try:
-            # Execute the JS code with Node.js
-            result = subprocess.run(
-                ["node", temp_file],
-                capture_output=True,
-                text=True,
-                timeout=timeout
+
+    START_CMD = "node -i"
+    PRINT_CMD = 'console.log("{}")'
+
+    def __init__(self, **kwargs) -> None:
+        # 检查 node 是否可用
+        if not shutil.which("node"):
+            logger.warning(
+                "[javascript_executor] 未找到 node 命令。"
+                "请安装 Node.js: https://nodejs.org"
             )
-            
-            # Prepare result dictionary
-            execution_result = {
-                "success": result.returncode == 0,
-                "return_code": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "language": "javascript"
-            }
-            
-            return execution_result
-            
-        except subprocess.TimeoutExpired:
-            return {
-                "success": False,
-                "return_code": -1,
-                "stdout": "",
-                "stderr": f"Execution timed out after {timeout} seconds",
-                "language": "javascript"
-            }
-        except FileNotFoundError:
-            return {
-                "success": False,
-                "return_code": -1,
-                "stdout": "",
-                "stderr": "Node.js is not installed or not in PATH",
-                "language": "javascript"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "return_code": -1,
-                "stdout": "",
-                "stderr": str(e),
-                "language": "javascript"
-            }
-        finally:
-            # Clean up the temporary file
-            try:
-                os.unlink(temp_file)
-            except OSError:
-                pass  # Ignore errors when cleaning up
-    
-    def validate_syntax(self, code: str) -> bool:
-        """
-        Validate JavaScript code syntax by attempting to parse it
-        """
-        # Create a temporary file to check syntax
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
-            # Wrap code in a function to catch more syntax errors
-            f.write("(function(){\n" + code + "\n})();")
-            temp_file = f.name
-        
-        try:
-            # Try to run the code with Node.js in check mode
-            result = subprocess.run(
-                ["node", "--check", temp_file],
-                capture_output=True,
-                text=True
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
-        finally:
-            # Clean up the temporary file
-            try:
-                os.unlink(temp_file)
-            except OSError:
-                pass
-    
-    def get_environment_info(self) -> Dict[str, str]:
-        """
-        Get JavaScript/Node.js environment information
-        """
-        try:
-            node_version = subprocess.check_output(["node", "--version"], text=True).strip()
-        except:
-            node_version = "Node.js not available"
-        
-        return {
-            "node_version": node_version,
-            "language": "javascript"
-        }
+        super().__init__(**kwargs)
+
+    def add_active_line_prints(self, code: str) -> str:
+        """注入 console.log("ACTIVE_LINE:<n>") 行号打印。"""
+        # 跳过含特殊语法的情况
+        skip_triggers = ("try", "catch", "`",)  # 模板字符串也跳过
+        if any(t in code for t in skip_triggers):
+            logger.debug("[javascript_executor] 跳过行号注入（含特殊语法）")
+            return code
+
+        code_lines = code.strip().split("\n")
+        modified: list[str] = []
+
+        for i, line in enumerate(code_lines):
+            leading_whitespace = ""
+            for next_line in code_lines[i:]:
+                if next_line.strip():
+                    leading_whitespace = next_line[: len(next_line) - len(next_line.lstrip())]
+                    break
+
+            print_line = leading_whitespace + self.PRINT_CMD.format(f"ACTIVE_LINE:{i + 1}")
+            modified.append(print_line)
+            modified.append(line)
+
+        return "\n".join(modified)
+
+
+# ── standalone 演示 ─────────────────────────────────────────────
+if __name__ == "__main__":
+    import shutil
+
+    if not shutil.which("node"):
+        print("Node.js 未安装，跳过演示")
+        sys.exit(0)
+
+    executor = JavaScriptExecutor(debug_mode=False)
+
+    class _DummyBlock:
+        active_line = None
+        output = ""
+        language = "javascript"
+        def refresh(self): pass
+        def end(self): pass
+
+    executor.active_block = _DummyBlock()  # type: ignore
+
+    print("=== JS 测试 1：基本运算 ===")
+    out = executor.run("console.log(1 + 2 + 3)")
+    print(f"Output: {out!r}\n")
+
+    print("=== JS 测试 2：数组操作 ===")
+    out = executor.run("const arr = [1,2,3,4,5]; console.log(arr.reduce((a,b)=>a+b, 0))")
+    print(f"Output: {out!r}\n")
+
+    executor.stop()

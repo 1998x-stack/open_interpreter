@@ -1,38 +1,78 @@
 """
-Abstract base class BaseLLMClient
+llm/base_llm.py — LLM 客户端抽象基类
+
+所有 LLM 后端（OpenAI、Anthropic、本地模型等）都继承此类。
+定义统一接口，使 Interpreter 与具体 LLM 实现解耦。
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
+from typing import Any, Generator, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..config import Settings
 
 
 class BaseLLMClient(ABC):
     """
-    Abstract base class for all LLM clients
+    LLM 客户端抽象基类。
+
+    子类须实现：
+    - stream_chat(messages, functions) → Generator
+    - validate_config()
     """
-    
-    def __init__(self, api_key: str, base_url: str, model: str):
-        self.api_key = api_key
-        self.base_url = base_url
-        self.model = model
-    
+
+    def __init__(self, config: "Settings") -> None:
+        self.config = config
+        self.validate_config()
+
     @abstractmethod
-    def generate_response(self, prompt: str, **kwargs) -> str:
+    def stream_chat(
+        self,
+        messages: list[dict],
+        functions: list[dict] | None = None,
+    ) -> Generator[dict, None, None]:
         """
-        Generate a response from the LLM
+        向 LLM 发送消息，返回流式 chunk 生成器。
+
+        每个 chunk 格式（OpenAI-compatible）：
+        {
+            "choices": [
+                {
+                    "delta": {"role"?, "content"?, "function_call"?},
+                    "finish_reason": null | "stop" | "function_call"
+                }
+            ]
+        }
+
+        Parameters
+        ----------
+        messages : list[dict]
+            对话历史，格式同 OpenAI messages
+        functions : list[dict] | None
+            Function schema 列表，None 表示不使用工具
+
+        Yields
+        ------
+        dict
+            OpenAI-compatible chunk
         """
-        pass
-    
+        ...
+
     @abstractmethod
-    def stream_response(self, prompt: str, **kwargs):
+    def validate_config(self) -> None:
+        """验证配置是否齐全（如 API key），不合法时抛出异常。"""
+        ...
+
+    def trim_messages(
+        self,
+        messages: list[dict],
+        model: str,
+        system_message: str = "",
+    ) -> list[dict]:
         """
-        Stream a response from the LLM
+        裁剪消息列表以适应模型的 context window。
+        默认实现：直接返回原列表（子类可 override）。
         """
-        pass
-    
-    @abstractmethod
-    def get_model_info(self) -> Dict[str, Any]:
-        """
-        Get information about the model
-        """
-        pass
+        return messages

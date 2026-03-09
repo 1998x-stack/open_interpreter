@@ -1,90 +1,105 @@
 """
-CLI entry point using argparse
+cli.py — 命令行入口
+
+支持的标志：
+  -y / --yes       跳过执行确认
+  -m / --model     指定模型（如 gpt-3.5-turbo）
+  --message        单次非交互调用
+  --debug          调试模式
+  --auto-run       等同于 -y
+
+用法：
+  python -m src.open_interpreter [flags]
+  python cli.py -y --message "计算圆周率前 10 位"
 """
 
+from __future__ import annotations
+
 import argparse
-from .interpreter import Interpreter
-from .config import Config
+import sys
+
+from loguru import logger
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Open Interpreter - AI-powered code execution environment"
+        description="Open Interpreter — LLM 驱动的本地代码执行 Agent",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "示例:\n"
+            "  python -m src.open_interpreter\n"
+            "  python -m src.open_interpreter -y\n"
+            "  python -m src.open_interpreter --message '计算 1 到 100 的质数之和'\n"
+            "  python -m src.open_interpreter --model gpt-3.5-turbo -y\n"
+        ),
     )
-    
+
     parser.add_argument(
-        "--model",
-        type=str,
-        default=None,
-        help="LLM model to use (default: from config)"
-    )
-    
-    parser.add_argument(
-        "--executor",
-        type=str,
-        default="python",
-        choices=["python", "shell", "javascript"],
-        help="Code executor to use (default: python)"
-    )
-    
-    parser.add_argument(
-        "--theme",
-        type=str,
-        default=None,
-        choices=["dark", "light"],
-        help="Display theme (default: from config)"
-    )
-    
-    parser.add_argument(
-        "--interactive",
-        "-i",
+        "-y", "--yes", "--auto-run",
+        dest="auto_run",
         action="store_true",
-        help="Start interactive mode"
+        help="执行代码前不需要用户确认",
     )
-    
+    parser.add_argument(
+        "-m", "--model",
+        dest="model",
+        type=str,
+        default=None,
+        help="指定 LLM 模型（覆盖 OPENAI_MODEL 环境变量）",
+    )
+    parser.add_argument(
+        "--message",
+        type=str,
+        default=None,
+        help="单次提问（非交互模式）",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="调试模式：打印详细日志",
+    )
+    return parser
+
+
+def cli() -> None:
+    """解析命令行参数，创建并启动 Interpreter。"""
+    from .interpreter import Interpreter
+    from .config import get_config, reset_config
+    import os
+
+    parser = build_parser()
     args = parser.parse_args()
-    
-    # Update config with CLI arguments
-    config = Config()
+
+    # 命令行参数覆盖环境变量
+    if args.debug:
+        os.environ["DEBUG_MODE"] = "true"
+        reset_config()  # 重置 lru_cache 使新配置生效
+
+    cfg = get_config()
+
+    interp = Interpreter(config=cfg)
+
+    # 覆盖配置
+    if args.auto_run:
+        interp.auto_run = True
     if args.model:
-        config.MODEL = args.model
-    if args.theme:
-        config.THEME = args.theme
-    
-    # Create interpreter instance
-    interpreter = Interpreter(config)
-    
-    if args.interactive:
-        run_interactive(interpreter, args.executor)
-    else:
-        # If no interactive mode, show help
-        parser.print_help()
+        interp.model = args.model
+        cfg.openai_model = args.model
+    if args.debug:
+        interp.debug_mode = True
+
+    logger.info(
+        f"[cli] 启动: model={interp.model}, auto_run={interp.auto_run}, "
+        f"debug={interp.debug_mode}"
+    )
+
+    try:
+        interp.chat(message=args.message)
+    except KeyboardInterrupt:
+        print("\n\n再见！")
+        sys.exit(0)
 
 
-def run_interactive(interpreter: Interpreter, executor_type: str):
-    """Run the interpreter in interactive mode"""
-    interpreter.switch_executor(executor_type)
-    
-    print(f"Starting interactive mode with {executor_type} executor...")
-    print("Type 'exit' to quit\n")
-    
-    while True:
-        try:
-            user_input = input(">>> ")
-            if user_input.lower() in ['exit', 'quit', 'q']:
-                break
-            
-            if user_input.strip():
-                response = interpreter.chat(user_input)
-                print(response)
-                
-        except KeyboardInterrupt:
-            print("\nGoodbye!")
-            break
-        except EOFError:
-            print("\nGoodbye!")
-            break
-
-
+# ── standalone 演示 ─────────────────────────────────────────────
 if __name__ == "__main__":
-    main()
+    cli()

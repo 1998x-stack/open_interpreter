@@ -1,83 +1,182 @@
 """
-JSON utilities: parse_partial_json, merge_deltas
+utils/json_utils.py — JSON 工具函数
+
+- merge_deltas: 合并 OpenAI 流式 delta 到完整消息对象
+- parse_partial_json: 容错解析不完整 JSON（流式 function_call arguments）
+- escape_newlines_in_json_string_values: 修复 JSON 字符串中的裸换行符
 """
 
+from __future__ import annotations
+
 import json
-import re
-from typing import Dict, Any, Union
+import sys
+import traceback
+from typing import Any
+
+from loguru import logger
 
 
-def parse_partial_json(json_str: str) -> Union[Dict[str, Any], None]:
+# ── merge_deltas ────────────────────────────────────────────────
+
+def merge_deltas(original: dict, delta: dict) -> dict:
     """
-    Parse a potentially incomplete JSON string by attempting to fix common issues
+    将 OpenAI 流式响应的 delta 合并进 original 消息对象。
+
+    规则：
+    - dict 类型：递归合并
+    - str / 其他类型：拼接（+=）
+
+    Examples
+    --------
+    >>> merge_deltas({}, {"role": "assistant"})
+    {'role': 'assistant'}
+    >>> merge_deltas({"content": "hello"}, {"content": " world"})
+    {'content': 'hello world'}
     """
-    # Try to parse the JSON as-is first
+    logger.debug(f"merge_deltas: delta_keys={list(delta.keys())}")
     try:
-        return json.loads(json_str)
+        for key, value in delta.items():
+            if isinstance(value, dict):
+                if key not in original:
+                    original[key] = value
+                else:
+                    merge_deltas(original[key], value)
+            else:
+                if key in original:
+                    original[key] += value
+                else:
+                    original[key] = value
+        return original
+    except Exception:
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        error_message = repr(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        logger.error(f"[json_utils] merge_deltas 失败: {error_message}")
+        raise
+
+
+# ── escape_newlines_in_json_string_values ───────────────────────
+
+def escape_newlines_in_json_string_values(s: str) -> str:
+    """
+    将 JSON 字符串值内部的裸换行符转义为 \\n。
+
+    GPT 的 function_call arguments 流式输出有时会包含未转义的换行，
+    导致 json.loads 失败。此函数在解析前修复这类问题。
+
+    Examples
+    --------
+    >>> s = '{"code": "print(\\"hi\\")'
+    >>> escape_newlines_in_json_string_values(s) == s
+    True
+    """
+    result: list[str] = []
+    in_string = False
+
+    for ch in s:
+        if ch == '"' and (not result or result[-1] != "\\"):
+            in_string = not in_string
+        if in_string and ch == "\n":
+            result.append("\\n")
+        else:
+            result.append(ch)
+
+    return "".join(result)
+
+
+# ── parse_partial_json ──────────────────────────────────────────
+
+def parse_partial_json(s: str) -> Any | None:
+    """
+    尝试解析可能不完整的 JSON 字符串。
+
+    策略：
+    1. 直接 json.loads（已完整）
+    2. 修复裸换行符
+    3. 追踪未闭合的括号/引号，补全后再次解析
+    4. 仍失败则返回 None
+
+    Parameters
+    ----------
+    s : str
+        待解析的字符串（可能是部分 JSON）
+
+    Returns
+    -------
+    解析结果（dict / list / str 等），或 None（解析失败）
+
+    Examples
+    --------
+    >>> parse_partial_json('{"language": "python", "code": "print(1)')
+    is not None  # True
+    """
+    logger.debug(f"parse_partial_json: input_length={len(s)}")
+
+    if not s or not s.strip():
+        return None
+
+    # 1. 尝试直接解析
+    try:
+        return json.loads(s)
     except json.JSONDecodeError:
         pass
-    
-    # If that fails, try to fix common issues
-    
-    # Remove trailing commas before closing braces/brackets
-    json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
-    
-    # Try to close unclosed objects and arrays
-    # Count opening and closing brackets
-    open_count = json_str.count('{') + json_str.count('[')
-    close_count = json_str.count('}') + json_str.count(']')
-    
-    # Close any unclosed brackets
-    while close_count < open_count:
-        if json_str.rstrip().endswith(','):
-            json_str = json_str.rstrip(',') + '}'
-        elif json_str.rstrip().endswith(':'):
-            json_str = json_str.rstrip(':') + '"}'
-        elif json_str.rstrip().endswith('"') or json_str.rstrip().endswith("'"):
-            json_str += '}'
-        else:
-            json_str += '}'
-        close_count += 1
-    
-    # Try to parse again
+
+    # 2. 修复裸换行
+    s = escape_newlines_in_json_string_values(s)
+
+    # 3. 追踪结构，补全括号
+    stack: list[str] = []
+    is_inside_string = False
+
+    for char in s:
+        if char == '"':
+            if stack and stack[-1] == "\\":
+                stack.pop()
+            else:
+                is_inside_string = not is_inside_string
+        elif not is_inside_string:
+            if char in ("{", "["):
+                stack.append(char)
+            elif char in ("}", "]"):
+                if stack and stack[-1] in ("{", "["):
+                    stack.pop()
+
+    if is_inside_string:
+        s += '"'
+
+    while stack:
+        open_char = stack.pop()
+        s += "}" if open_char == "{" else "]"
+
     try:
-        return json.loads(json_str)
+        return json.loads(s)
     except json.JSONDecodeError:
-        # If still failing, try more aggressive truncation
-        # Find the longest valid JSON prefix
-        for i in range(len(json_str), 0, -1):
-            try:
-                partial = json_str[:i]
-                # Add closing brackets if needed
-                open_count = partial.count('{') + partial.count('[')
-                close_count = partial.count('}') + partial.count(']')
-                
-                while close_count < open_count:
-                    partial += '}'
-                    close_count += 1
-                
-                return json.loads(partial)
-            except json.JSONDecodeError:
-                continue
-        
+        logger.warning(f"parse_partial_json: 仍无法解析，返回 None. snippet={s[:80]!r}")
         return None
 
 
-def merge_deltas(original: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Merge a delta (partial update) into the original dictionary
-    """
-    result = original.copy()
-    
-    for key, value in delta.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
-            # Recursively merge nested dictionaries
-            result[key] = merge_deltas(result[key], value)
-        elif value is None and key in result:
-            # Remove key if value is None
-            del result[key]
-        else:
-            # Update or add the key-value pair
-            result[key] = value
-    
-    return result
+# ── standalone 演示 ─────────────────────────────────────────────
+if __name__ == "__main__":
+    # merge_deltas 演示
+    msg: dict = {}
+    for delta in [
+        {"role": "assistant"},
+        {"content": "Hello"},
+        {"content": " world"},
+        {"function_call": {"name": "run_code"}},
+        {"function_call": {"arguments": '{"lan'}},
+        {"function_call": {"arguments": 'guage": "python"}'}},
+    ]:
+        merge_deltas(msg, delta)
+
+    print("Merged message:", json.dumps(msg, ensure_ascii=False, indent=2))
+
+    # parse_partial_json 演示
+    cases = [
+        '{"language": "python", "code": "print(1)',   # missing closing }
+        '{"language": "python", "code": "x = 1\ny = 2"}',  # valid
+        '{"code": "',                                  # very incomplete
+        "",                                            # empty
+    ]
+    for c in cases:
+        result = parse_partial_json(c)
+        print(f"Input: {c[:40]!r}  →  {result}")
