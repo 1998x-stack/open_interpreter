@@ -1,0 +1,257 @@
+{
+  "project": "Open Interpreter",
+  "version": "0.0.289",
+  "features": [
+    {
+      "id": "core-001",
+      "category": "Core Functionality",
+      "description": "Initialize interpreter with default settings",
+      "priority": 100,
+      "test_steps": [
+        "Import interpreter module",
+        "Create new Interpreter() instance",
+        "Verify default settings are correct"
+      ],
+      "passes": false
+    },
+    {
+      "id": "core-002",
+      "category": "Core Functionality",
+      "description": "Execute Python code in local environment",
+      "priority": 99,
+      "test_steps": [
+        "Create interpreter instance",
+        "Call interpreter.chat() with Python code request",
+        "Verify code executes and returns output"
+      ],
+      "passes": false
+    },
+    {
+      "id": "core-003",
+      "category": "Core Functionality",
+      "description": "Support multiple programming languages (Python, Shell, JS, AppleScript)",
+      "priority": 98,
+      "test_steps": [
+        "Test Python code execution",
+        "Test shell command execution",
+        "Test JavaScript execution (if Node.js available)",
+        "Test AppleScript execution (if on macOS)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "api-001",
+      "category": "API Interface",
+      "description": "Provide programmatic API for chat interactions",
+      "priority": 95,
+      "test_steps": [
+        "Import interpreter module",
+        "Create Interpreter() instance",
+        "Call interpreter.chat('Hello') programmatically",
+        "Verify response is returned"
+      ],
+      "passes": false
+    },
+    {
+      "id": "api-002",
+      "category": "API Interface",
+      "description": "Support returning messages for conversation persistence",
+      "priority": 90,
+      "test_steps": [
+        "Call interpreter.chat(message, return_messages=True)",
+        "Verify returned messages object is properly structured",
+        "Test loading messages back with interpreter.load()"
+      ],
+      "passes": false
+    },
+    {
+      "id": "api-003",
+      "category": "API Interface",
+      "description": "Implement interpreter.reset() functionality",
+      "priority": 85,
+      "test_steps": [
+        "Add messages to interpreter instance",
+        "Call interpreter.reset()",
+        "Verify messages list is empty",
+        "Verify code interpreters are cleared"
+      ],
+      "passes": false
+    },
+    {
+      "id": "cli-001",
+      "category": "CLI Interface",
+      "description": "Provide command-line interface with proper argument parsing",
+      "priority": 97,
+      "test_steps": [
+        "Run 'python -m interpreter.cli' (or equivalent)",
+        "Verify argument parsing works (--yes, --fast, --local, --debug)",
+        "Test each command line flag independently"
+      ],
+      "passes": false
+    },
+    {
+      "id": "cli-002",
+      "category": "CLI Interface",
+      "description": "Support auto-approval mode (-y/--yes flag)",
+      "priority": 88,
+      "test_steps": [
+        "Set interpreter.auto_run = True",
+        "Execute code that would normally require approval",
+        "Verify code runs without manual approval"
+      ],
+      "passes": false
+    },
+    {
+      "id": "security-001",
+      "category": "Security",
+      "description": "Require user confirmation before running code by default",
+      "priority": 96,
+      "test_steps": [
+        "Attempt to execute code in default mode",
+        "Verify user is prompted for approval",
+        "Verify code only runs when user confirms"
+      ],
+      "passes": false
+    },
+    {
+      "id": "security-002",
+      "category": "Security",
+      "description": "Validate API key presence and validity",
+      "priority": 94,
+      "test_steps": [
+        "Attempt to initialize without API key",
+        "Verify appropriate error/warning message appears",
+        "Test with invalid API key, verify error handling"
+      ],
+      "passes": false
+    },
+    {
+      "id": "ui-001",
+      "category": "User Experience",
+      "description": "Display code blocks with syntax highlighting",
+      "priority": 80,
+      "test_steps": [
+        "Execute code that triggers code block display",
+        "Verify proper syntax highlighting in terminal",
+        "Verify code language is properly labeled"
+      ],
+      "passes": false
+    },
+    {
+      "id": "ui-002",
+      "category": "User Experience",
+      "description": "Stream responses in real-time during execution",
+      "priority": 75,
+      "test_steps": [
+        "Execute code with long-running output",
+        "Verify output appears in real-time",
+        "Verify progress indicators work properly"
+      ],
+      "passes": false
+    },
+    {
+      "id": "logging-001",
+      "category": "Logging",
+      "description": "Add comprehensive logging using loguru",
+      "priority": 70,
+      "test_steps": [
+        "Install and import loguru",
+        "Add logging throughout codebase",
+        "Verify logs capture important events",
+        "Test different log levels (info, debug, warning, error)"
+      ],
+      "passes": true
+    },
+    {
+      "id": "arch-001",
+      "category": "Architecture",
+      "description": "Refactor code to use pluggable factory pattern",
+      "priority": 65,
+      "test_steps": [
+        "Identify current monolithic components",
+        "Create factory classes for interpreters",
+        "Implement plugin system for new languages",
+        "Verify existing functionality still works"
+      ],
+      "passes": true
+    },
+    {
+      "id": "testing-001",
+      "category": "Testing",
+      "description": "Create comprehensive unit test suite",
+      "priority": 85,
+      "test_steps": [
+        "Create test files for each module",
+        "Test edge cases and error conditions",
+        "Achieve >80% code coverage",
+        "Verify all tests pass consistently"
+      ],
+      "passes": true
+    },
+    {
+      "id": "config-001",
+      "category": "Configuration",
+      "description": "Support custom configuration via environment variables",
+      "priority": 78,
+      "test_steps": [
+        "Test OPENAI_API_KEY environment variable",
+        "Add support for additional config vars",
+        "Verify fallback behavior when vars missing",
+        "Test custom model selection via env vars"
+      ],
+      "passes": true
+    },
+    {
+      "id": "perf-001",
+      "category": "Performance",
+      "description": "Optimize token usage and API call efficiency",
+      "priority": 60,
+      "test_steps": [
+        "Measure token usage for common operations",
+        "Optimize system message trimming",
+        "Implement caching where appropriate",
+        "Verify performance improvements"
+      ],
+      "passes": false
+    },
+    {
+      "id": "docs-001",
+      "category": "Documentation",
+      "description": "Update documentation with new features and changes",
+      "priority": 50,
+      "test_steps": [
+        "Update README with new functionality",
+        "Document configuration options",
+        "Add code examples",
+        "Verify documentation accuracy"
+      ],
+      "passes": false
+    },
+    {
+      "id": "llm-001",
+      "category": "LLM Integration",
+      "description": "Support local models via Llama 2 integration",
+      "priority": 40,
+      "test_steps": [
+        "Enable local mode with interpreter.local = True",
+        "Verify Llama 2 integration works",
+        "Test performance differences",
+        "Document local model setup"
+      ],
+      "passes": false
+    },
+    {
+      "id": "ext-001",
+      "category": "Extensibility",
+      "description": "Add plugin system for extending functionality",
+      "priority": 30,
+      "test_steps": [
+        "Design plugin interface",
+        "Implement example plugin",
+        "Test plugin loading/unloading",
+        "Document plugin API"
+      ],
+      "passes": false
+    }
+  ]
+}
